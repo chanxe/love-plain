@@ -1,0 +1,438 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-12 text-center">
+        <h2 class="display-5 fw-bold text-primary">📝 恋爱日常</h2>
+        <p class="text-muted">记录我们的点滴生活</p>
+    </div>
+</div>
+
+<!-- Search & Filter Bar -->
+<div class="row mb-4 justify-content-center">
+    <div class="col-md-8">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <div class="row g-2 align-items-center">
+                    <div class="col-md-6">
+                        <input type="text" id="searchInput" class="form-control" placeholder="搜索动态内容...">
+                    </div>
+                    <div class="col-md-3">
+                        <select id="userFilter" class="form-select">
+                            <option value="">全部发布者</option>
+                            <!-- Users will be populated here if we have an API for users, or hardcoded for now -->
+                            <option value="1">Boy</option>
+                            <option value="2">Girl</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3 d-grid">
+                        <button id="searchBtn" class="btn btn-outline-primary">🔍 搜索</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Publish Button -->
+<div class="fixed-bottom mb-4 me-4 text-end" style="z-index: 100;">
+    <button class="btn btn-primary rounded-circle shadow-lg p-3" data-bs-toggle="modal" data-bs-target="#publishModal" style="width: 60px; height: 60px;">
+        <span class="h3">➕</span>
+    </button>
+</div>
+
+<!-- Moments List -->
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div id="momentsList">
+            <!-- Moments will be loaded here -->
+        </div>
+        
+        <div id="loading" class="text-center py-4 d-none">
+            <div class="spinner-border text-primary" role="status"></div>
+        </div>
+        
+        <div id="loadMoreContainer" class="text-center py-4 d-none">
+            <button id="loadMoreBtn" class="btn btn-outline-secondary rounded-pill px-4">加载更多</button>
+        </div>
+        
+        <div id="noMoreData" class="text-center py-4 text-muted d-none">
+            没有更多动态了 ~
+        </div>
+    </div>
+</div>
+
+<!-- Publish Modal -->
+<div class="modal fade" id="publishModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">发布新动态</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="/moments/add" method="POST" enctype="multipart/form-data">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">我是谁？</label>
+                        <select name="user_id" class="form-select">
+                            <option value="1">Boy</option>
+                            <option value="2">Girl</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <textarea name="content" class="form-control" rows="4" placeholder="今天发生了什么..." required></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">添加图片 (可选)</label>
+                        <input type="file" name="images" class="form-control" multiple accept="image/*">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">发布</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Template for a Moment Item (Hidden) -->
+<template id="momentTemplate">
+    <div class="card mb-4 shadow-sm border-0 moment-item">
+        <div class="card-body">
+            <div class="d-flex align-items-center mb-3">
+                <img src="" class="rounded-circle me-2 user-avatar" width="40" height="40" alt="Avatar">
+                <div>
+                    <h6 class="mb-0 user-name fw-bold"></h6>
+                    <small class="text-muted created-at"></small>
+                </div>
+                <div class="ms-auto dropdown">
+                     <button class="btn btn-link text-muted p-0" data-bs-toggle="dropdown">•••</button>
+                     <ul class="dropdown-menu dropdown-menu-end">
+                         <li><a class="dropdown-item text-danger delete-btn" href="#">删除</a></li>
+                     </ul>
+                </div>
+            </div>
+            
+            <p class="card-text content-text mb-3" style="white-space: pre-wrap;"></p>
+            
+            <div class="images-container row g-2 mb-3">
+                <!-- Images will be inserted here -->
+            </div>
+            
+            <div class="d-flex justify-content-between align-items-center border-top pt-3">
+                <div>
+                    <button class="btn btn-sm btn-outline-danger border-0 like-btn">
+                        ❤️ <span class="likes-count">0</span>
+                    </button>
+                    <button class="btn btn-sm btn-outline-primary border-0 comment-btn">
+                        💬 <span class="comments-count">0</span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Comments Section -->
+            <div class="comments-section mt-3 bg-light p-3 rounded d-none">
+                <div class="comments-list mb-2">
+                    <!-- Comments loaded here -->
+                </div>
+                <div class="text-center mb-2 d-none load-more-comments-container">
+                    <button class="btn btn-sm btn-link text-muted load-more-comments-btn">查看更多评论</button>
+                </div>
+                <div class="input-group input-group-sm">
+                    <input type="text" class="form-control comment-input" placeholder="写评论...">
+                    <button class="btn btn-primary send-comment-btn">发送</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<!-- Template for a Single Comment Item (Hidden) -->
+<template id="commentItemTemplate">
+    <div class="d-flex mb-2 comment-item">
+        <img src="" class="rounded-circle me-2 comment-avatar" width="30" height="30" alt="Avatar">
+        <div class="bg-white p-2 rounded flex-grow-1">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <strong class="small comment-user-name"></strong>
+                <small class="text-muted small comment-time"></small>
+            </div>
+            <p class="mb-0 small comment-content" style="white-space: pre-wrap;"></p>
+        </div>
+    </div>
+</template>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        let currentPage = 1;
+        let isLoading = false;
+        let hasMore = true;
+        const momentsList = document.getElementById('momentsList');
+        const loadingSpinner = document.getElementById('loading');
+        const loadMoreBtn = document.getElementById('loadMoreBtn');
+        const loadMoreContainer = document.getElementById('loadMoreContainer');
+        const noMoreData = document.getElementById('noMoreData');
+        const searchBtn = document.getElementById('searchBtn');
+        const searchInput = document.getElementById('searchInput');
+        const userFilter = document.getElementById('userFilter');
+        const commentTemplate = document.getElementById('commentItemTemplate');
+        
+        // Initial Load
+        loadMoments();
+        
+        // Search
+        searchBtn.addEventListener('click', () => {
+            resetList();
+            loadMoments();
+        });
+        
+        // Load More
+        loadMoreBtn.addEventListener('click', () => {
+            loadMoments();
+        });
+        
+        function resetList() {
+            momentsList.innerHTML = '';
+            currentPage = 1;
+            hasMore = true;
+            noMoreData.classList.add('d-none');
+        }
+        
+        function loadMoments() {
+            if (isLoading || !hasMore) return;
+            
+            isLoading = true;
+            loadingSpinner.classList.remove('d-none');
+            loadMoreContainer.classList.add('d-none');
+            
+            const keyword = searchInput.value;
+            const userId = userFilter.value;
+            
+            const params = new URLSearchParams({
+                page: currentPage,
+                per_page: 5, // Load 5 at a time for demo
+                keyword: keyword,
+                user_id: userId
+            });
+            
+            fetch(`/api/moments?${params}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.code === 200) {
+                        const items = data.data.items;
+                        if (items.length === 0) {
+                            hasMore = false;
+                            if (currentPage === 1) {
+                                momentsList.innerHTML = '<div class="text-center text-muted py-5">暂无动态</div>';
+                            } else {
+                                noMoreData.classList.remove('d-none');
+                            }
+                        } else {
+                            renderMoments(items);
+                            if (!data.data.pagination.has_next) {
+                                hasMore = false;
+                                noMoreData.classList.remove('d-none');
+                            } else {
+                                currentPage++;
+                                loadMoreContainer.classList.remove('d-none');
+                            }
+                        }
+                    }
+                })
+                .catch(err => {
+                    console.error('Error:', err);
+                    alert('加载失败');
+                })
+                .finally(() => {
+                    isLoading = false;
+                    loadingSpinner.classList.add('d-none');
+                });
+        }
+        
+        function renderMoments(items) {
+            const template = document.getElementById('momentTemplate');
+            
+            items.forEach(item => {
+                const clone = template.content.cloneNode(true);
+                const card = clone.querySelector('.moment-item');
+                
+                // User Info
+                clone.querySelector('.user-name').textContent = item.publisher.name;
+                clone.querySelector('.user-avatar').src = item.publisher.avatar;
+                clone.querySelector('.created-at').textContent = item.created_at;
+                
+                // Content
+                clone.querySelector('.content-text').textContent = item.content;
+                
+                // Images
+                const imgContainer = clone.querySelector('.images-container');
+                if (item.images && item.images.length > 0) {
+                    item.images.forEach(imgSrc => {
+                        const col = document.createElement('div');
+                        col.className = 'col-4';
+                        col.innerHTML = `<img src="${imgSrc}" class="img-fluid rounded" style="object-fit: cover; width: 100%; height: 100px; cursor: pointer;" onclick="window.open('${imgSrc}')">`;
+                        imgContainer.appendChild(col);
+                    });
+                } else {
+                    imgContainer.remove();
+                }
+                
+                // Stats
+                const likesCountEl = clone.querySelector('.likes-count');
+                likesCountEl.textContent = item.stats.likes;
+                
+                const commentsCountEl = clone.querySelector('.comments-count');
+                commentsCountEl.textContent = item.stats.comments;
+                
+                // Actions
+                const likeBtn = clone.querySelector('.like-btn');
+                likeBtn.addEventListener('click', () => {
+                    fetch(`/moments/${item.id}/like`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({user_id: 1}) // Simulate current user
+                    })
+                    .then(res => res.json())
+                    .then(res => {
+                        if (res.code === 200) {
+                            let current = parseInt(likesCountEl.textContent);
+                            if (res.action === 'liked') likesCountEl.textContent = current + 1;
+                            else likesCountEl.textContent = current - 1;
+                        }
+                    });
+                });
+                
+                // Delete
+                const deleteBtn = clone.querySelector('.delete-btn');
+                deleteBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    if(confirm('确定删除这条动态吗？')) {
+                        fetch(`/moments/${item.id}/delete`, {method: 'POST'})
+                        .then(res => res.json())
+                        .then(res => {
+                            if(res.code === 200) {
+                                card.remove();
+                            }
+                        });
+                    }
+                });
+                
+                // Comments Toggle
+                const commentBtn = clone.querySelector('.comment-btn');
+                const commentsSection = clone.querySelector('.comments-section');
+                const commentsListEl = clone.querySelector('.comments-list');
+                const loadMoreCommentsBtn = clone.querySelector('.load-more-comments-btn');
+                const loadMoreCommentsContainer = clone.querySelector('.load-more-comments-container');
+                let commentsPage = 1;
+                let commentsLoaded = false;
+                
+                commentBtn.addEventListener('click', () => {
+                    const isHidden = commentsSection.classList.contains('d-none');
+                    commentsSection.classList.toggle('d-none');
+                    
+                    if (isHidden && !commentsLoaded) {
+                        loadComments(item.id, 1);
+                    }
+                });
+
+                loadMoreCommentsBtn.addEventListener('click', () => {
+                    loadComments(item.id, commentsPage + 1);
+                });
+
+                function loadComments(momentId, page) {
+                    loadMoreCommentsBtn.textContent = '加载中...';
+                    loadMoreCommentsBtn.disabled = true;
+
+                    fetch(`/api/moments/${momentId}/comments?page=${page}&per_page=10`)
+                        .then(res => res.json())
+                        .then(res => {
+                            if (res.code === 200) {
+                                commentsPage = page;
+                                const items = res.data.items;
+                                
+                                if (page === 1) {
+                                    commentsListEl.innerHTML = '';
+                                }
+
+                                items.forEach(comment => {
+                                    renderComment(comment, commentsListEl);
+                                });
+                                
+                                commentsLoaded = true;
+
+                                // Handle pagination button
+                                if (res.data.pagination.has_next) {
+                                    loadMoreCommentsContainer.classList.remove('d-none');
+                                    loadMoreCommentsBtn.textContent = '查看更多评论';
+                                    loadMoreCommentsBtn.disabled = false;
+                                } else {
+                                    loadMoreCommentsContainer.classList.add('d-none');
+                                }
+                                
+                                // Update count if needed, though usually we trust the list stats
+                            }
+                        })
+                        .catch(err => {
+                            console.error('Failed to load comments:', err);
+                            loadMoreCommentsBtn.textContent = '加载失败';
+                        });
+                }
+                
+                function renderComment(comment, container) {
+                    const commentClone = commentTemplate.content.cloneNode(true);
+                    commentClone.querySelector('.comment-avatar').src = comment.user.avatar;
+                    commentClone.querySelector('.comment-user-name').textContent = comment.user.name;
+                    commentClone.querySelector('.comment-time').textContent = comment.timestamp;
+                    commentClone.querySelector('.comment-content').textContent = comment.content;
+                    container.appendChild(commentClone);
+                }
+                
+                // Send Comment
+                const sendBtn = clone.querySelector('.send-comment-btn');
+                const commentInput = clone.querySelector('.comment-input');
+                
+                sendBtn.addEventListener('click', () => {
+                    const content = commentInput.value.trim();
+                    if (!content) return;
+                    
+                    sendBtn.disabled = true;
+                    sendBtn.textContent = '发送中...';
+
+                    fetch(`/moments/${item.id}/comment`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            content: content,
+                            user_id: 1 // Simulate current user
+                        })
+                    })
+                    .then(res => res.json())
+                    .then(res => {
+                        if (res.code === 200) {
+                            commentInput.value = '';
+                            commentsCountEl.textContent = parseInt(commentsCountEl.textContent) + 1;
+                            
+                            // Append the new comment
+                            renderComment(res.data, commentsListEl);
+                            
+                            // If list was hidden or empty, ensure it's shown
+                            if (commentsSection.classList.contains('d-none')) {
+                                commentsSection.classList.remove('d-none');
+                            }
+                        }
+                    })
+                    .finally(() => {
+                        sendBtn.disabled = false;
+                        sendBtn.textContent = '发送';
+                    });
+                });
+
+                momentsList.appendChild(clone);
+            });
+        }
+    });
+</script>
+{% endblock %}
