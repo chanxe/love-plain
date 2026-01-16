@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO, emit, join_room, leave_room
+from sqlalchemy import func
 import os
 from datetime import datetime, date
 from dotenv import load_dotenv
@@ -30,6 +31,8 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), nullable=False)
     avatar = db.Column(db.String(200), default='/static/avatars/default.png')
+    token = db.Column(db.String(100), unique=True, nullable=False)  # 新增 token 字段
+    role = db.Column(db.String(20), nullable=False)  # 'male' or 'female'
 
 class Anniversary(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -83,15 +86,54 @@ class Message(db.Model):
     
     sender = db.relationship('User', backref=db.backref('messages', lazy=True))
 
+# Authentication Functions and Decorators
+from functools import wraps
+from flask import session
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        token = session.get('token')
+        
+        # Check if it's an API request (returns JSON)
+        is_api_request = request.path.startswith('/api/')
+        
+        if not token or not validate_token(token):
+            if is_api_request:
+                # For API requests, return JSON error
+                return {'code': 401, 'msg': 'Authentication required'}, 401
+            else:
+                # For page requests, redirect to login
+                return redirect(url_for('login'))
+        
+        return f(*args, **kwargs)
+    return decorated_function
+
+def validate_token(token):
+    user = User.query.filter_by(token=token).first()
+    return user is not None
+
+def get_current_user():
+    token = session.get('token')
+    if token:
+        return User.query.filter_by(token=token).first()
+    return None
+
 # Routes
 @app.route('/')
+@login_required
 def index():
-    # Only fetch the 5 most recent anniversaries for the main dashboard
-    recent_anniversaries = Anniversary.query.order_by(Anniversary.id.desc()).limit(5).all()
+    # Fetch only the 2 most important anniversaries (ordered by proximity to today)
+    today = date.today()
+    important_anniversaries = Anniversary.query.order_by(
+        # Calculate days difference from today and sort by ascending order
+        func.julianday(Anniversary.date) - func.julianday(today)
+    ).limit(2).all()
     total_count = Anniversary.query.count()
-    return render_template('index.html', anniversaries=recent_anniversaries, total_count=total_count)
+    return render_template('index.html', anniversaries=important_anniversaries, total_count=total_count)
 
 @app.route('/api/anniversaries')
+@login_required
 def get_anniversaries():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 5, type=int)
@@ -145,23 +187,69 @@ def add_anniversary():
         db.session.commit()
     return redirect(url_for('index'))
 
+@app.route('/anniversaries')
+@login_required
+def anniversaries():
+    return render_template('anniversaries.html')
+
 @app.route('/anniversaries/delete/<int:id>')
+@login_required
 def delete_anniversary(id):
     anniversary = Anniversary.query.get_or_404(id)
     db.session.delete(anniversary)
     db.session.commit()
     return redirect(url_for('index'))
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        token = request.form.get('token')
+        user = User.query.filter_by(token=token).first()
+        if user:
+            session['token'] = token
+            session['user_id'] = user.id
+            return redirect(url_for('index'))
+        else:
+            return render_template('login.html', error='Invalid token')
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
+# Additional API endpoints for authentication
+@app.route('/api/user/info')
+@login_required
+def user_info():
+    """Get current user info"""
+    user = get_current_user()
+    if user:
+        return {
+            'code': 200,
+            'msg': 'success',
+            'data': {
+                'id': user.id,
+                'name': user.name,
+                'avatar': user.avatar,
+                'role': user.role
+            }
+        }
+    else:
+        return {'code': 401, 'msg': 'User not found'}, 401
+
 def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
 @app.route('/moments')
+@login_required
 def moments():
     # Render the moments page. The actual data loading will be done via AJAX to /api/moments
     return render_template('moments.html')
 
 @app.route('/api/moments')
+@login_required
 def get_moments():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 20, type=int)
@@ -169,7 +257,9 @@ def get_moments():
     keyword = request.args.get('keyword', type=str)
     mode = request.args.get('mode', 'fuzzy')
     
-    query = Moment.query.order_by(Moment.timestamp.desc())
+    query = Moment.query.options(
+        db.joinedload(Moment.user)  # 预加载用户数据
+    ).order_by(Moment.timestamp.desc())
     
     if user_id:
         query = query.filter_by(user_id=user_id)
@@ -184,22 +274,25 @@ def get_moments():
     
     items = []
     for m in pagination.items:
+        # 验证用户数据是否存在
+        if not m.user:
+            print(f"Warning: Moment {m.id} has no associated user")
+            continue
+            
         items.append({
             'id': m.id,
             'content': m.content,
             'images': m.images,
             'publisher': {
                 'id': m.user.id,
-                'name': m.user.name,
-                'avatar': m.user.avatar
+                'name': m.user.name or 'Unknown User',
+                'avatar': m.user.avatar or '/static/avatars/default.png'
             },
             'created_at': m.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
             'stats': {
                 'likes': len(m.likes),
                 'comments': len(m.comments)
             },
-            # Also include comments/likes detail if needed, but spec just says stats for list
-            # We might want to include "is_liked" if we had a current user context
         })
         
     return {
@@ -218,9 +311,13 @@ def get_moments():
     }
 
 @app.route('/moments/add', methods=['POST'])
+@login_required
 def add_moment():
     content = request.form.get('content')
-    user_id = request.form.get('user_id', 1, type=int) # Default to user 1
+    # 从当前会话获取用户身份，不再接受前端传递的user_id
+    current_user = get_current_user()
+    if not current_user:
+        return {'code': 401, 'msg': 'Authentication required'}, 401
     
     if not content:
         return {'code': 400, 'msg': 'Content is required'}, 400
@@ -237,7 +334,7 @@ def add_moment():
                 file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
                 image_paths.append(f"/static/uploads/{filename}")
     
-    moment = Moment(content=content, user_id=user_id)
+    moment = Moment(content=content, user_id=current_user.id)
     moment.images = image_paths
     
     db.session.add(moment)
@@ -246,24 +343,35 @@ def add_moment():
     return redirect(url_for('moments'))
 
 @app.route('/moments/<int:id>/delete', methods=['POST'])
+@login_required
 def delete_moment(id):
     moment = Moment.query.get_or_404(id)
+    current_user = get_current_user()
+    if not current_user:
+        return {'code': 401, 'msg': 'Authentication required'}, 401
+    
+    # Only allow the publisher to delete their own moment
+    if moment.user_id != current_user.id:
+        return {'code': 403, 'msg': 'Permission denied'}, 403
+    
     db.session.delete(moment)
     db.session.commit()
     return {'code': 200, 'msg': 'success'}
 
 @app.route('/moments/<int:id>/like', methods=['POST'])
+@login_required
 def like_moment(id):
-    # Toggle like. In a real app we'd check if user already liked.
-    # Here we just add a like for the current simulated user.
-    user_id = request.json.get('user_id', 1)
+    # 从当前会话获取用户身份
+    current_user = get_current_user()
+    if not current_user:
+        return {'code': 401, 'msg': 'Authentication required'}, 401
     
-    existing_like = Like.query.filter_by(user_id=user_id, moment_id=id).first()
+    existing_like = Like.query.filter_by(user_id=current_user.id, moment_id=id).first()
     if existing_like:
         db.session.delete(existing_like)
         action = 'unliked'
     else:
-        new_like = Like(user_id=user_id, moment_id=id)
+        new_like = Like(user_id=current_user.id, moment_id=id)
         db.session.add(new_like)
         action = 'liked'
         
@@ -271,14 +379,18 @@ def like_moment(id):
     return {'code': 200, 'msg': 'success', 'action': action}
 
 @app.route('/moments/<int:id>/comment', methods=['POST'])
+@login_required
 def comment_moment(id):
     content = request.json.get('content')
-    user_id = request.json.get('user_id', 1)
+    # 从当前会话获取用户身份
+    current_user = get_current_user()
+    if not current_user:
+        return {'code': 401, 'msg': 'Authentication required'}, 401
     
     if not content:
          return {'code': 400, 'msg': 'Content is required'}, 400
          
-    comment = Comment(content=content, user_id=user_id, moment_id=id)
+    comment = Comment(content=content, user_id=current_user.id, moment_id=id)
     db.session.add(comment)
     db.session.commit()
     
@@ -293,6 +405,7 @@ def comment_moment(id):
     }}
 
 @app.route('/api/moments/<int:id>/comments')
+@login_required
 def get_moment_comments(id):
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
@@ -327,10 +440,12 @@ def get_moment_comments(id):
     }
 
 @app.route('/chat')
+@login_required
 def chat():
     return render_template('chat.html')
 
 @app.route('/api/chat/history')
+@login_required
 def get_chat_history():
     before_id = request.args.get('before_id', type=int)
     limit = request.args.get('limit', 20, type=int)
@@ -360,15 +475,29 @@ def get_chat_history():
         'has_more': len(items) == limit
     }
 
+def authenticate_socketio():
+    """Helper function to authenticate Socket.IO connections"""
+    sid = request.sid
+    token = session.get('token')
+    if not token or not validate_token(token):
+        return False
+    return True
+
 # Socket.IO Events
 @socketio.on('join')
 def on_join(data):
+    if not authenticate_socketio():
+        return False
+        
     room = data.get('room', 'couple_room')
     join_room(room)
     # emit('status', {'msg': 'Someone joined'}, room=room)
 
 @socketio.on('message')
 def on_message(data):
+    if not authenticate_socketio():
+        return False
+        
     content = data.get('content')
     sender_id = data.get('sender_id', 1)
     room = data.get('room', 'couple_room')
@@ -376,6 +505,13 @@ def on_message(data):
     if not content:
         return
         
+    # Verify sender_id belongs to authenticated user if needed
+    token = session.get('token')
+    current_user = get_current_user()
+    if current_user and str(current_user.id) != str(sender_id):
+        # Optionally restrict to authenticated user's ID
+        pass
+    
     # Save to DB
     msg = Message(content=content, sender_id=sender_id)
     db.session.add(msg)
@@ -399,16 +535,25 @@ def on_message(data):
 
 @socketio.on('typing')
 def on_typing(data):
+    if not authenticate_socketio():
+        return False
+        
     room = data.get('room', 'couple_room')
     emit('status_change', {'user_id': data.get('sender_id'), 'status': 'typing'}, room=room, include_self=False)
 
 @socketio.on('stop_typing')
 def on_stop_typing(data):
+    if not authenticate_socketio():
+        return False
+        
     room = data.get('room', 'couple_room')
     emit('status_change', {'user_id': data.get('sender_id'), 'status': 'online'}, room=room, include_self=False)
 
 @socketio.on('recall')
 def on_recall(data):
+    if not authenticate_socketio():
+        return False
+        
     msg_id = data.get('id')
     sender_id = data.get('sender_id')
     room = data.get('room', 'couple_room')

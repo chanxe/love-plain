@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <div class="row mb-4">
+        <div class="col-md-12 text-center">
+            <h2 class="display-5 fw-bold text-danger">📅 纪念日列表</h2>
+            <p class="text-muted">记录我们的特殊时刻</p>
+        </div>
+    </div>
+
+    <!-- Add Anniversary Button -->
+    <div class="row mb-4 justify-content-center">
+        <div class="col-md-8">
+            <div class="d-grid">
+                <button id="addAnniversaryBtn" class="btn btn-danger btn-lg">
+                    + 添加新纪念日
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Anniversaries List -->
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card shadow-sm">
+                <div class="card-body p-0">
+                    <ul class="list-group list-group-flush" id="anniversariesList">
+                        <!-- Anniversaries will be loaded here -->
+                    </ul>
+                </div>
+            </div>
+            
+            <!-- Load More Button -->
+            <div class="mt-4 text-center">
+                <button id="loadMoreBtn" class="btn btn-outline-secondary" style="display: none;">加载更多</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Add Anniversary -->
+<div class="modal fade" id="addAnniversaryModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">添加纪念日</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="addAnniversaryForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">标题</label>
+                        <input type="text" name="title" class="form-control" placeholder="例如：在一起" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">日期</label>
+                        <input type="date" name="date" class="form-control" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-danger">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    let currentPage = 1;
+    const itemsPerPage = 10;
+    let hasMore = false;
+
+    // Load anniversaries on page load
+    loadAnniversaries();
+
+    // Add anniversary button
+    const addBtn = document.getElementById('addAnniversaryBtn');
+    const modalEl = document.getElementById('addAnniversaryModal');
+    
+    if (addBtn && modalEl) {
+        addBtn.addEventListener('click', function() {
+            if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+                const modal = new bootstrap.Modal(modalEl);
+                modal.show();
+            }
+        });
+    }
+
+    // Handle form submission
+    const form = document.getElementById('addAnniversaryForm');
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(form);
+            fetch('/anniversaries/add', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.redirected ? window.location.reload() : response.text())
+            .then(() => {
+                // Close modal and reset form
+                const modal = bootstrap.Modal.getInstance(modalEl);
+                modal.hide();
+                form.reset();
+                // Reload anniversaries
+                currentPage = 1;
+                loadAnniversaries();
+            })
+            .catch(error => console.error('Error:', error));
+        });
+    }
+
+    // Load more button
+    const loadMoreBtn = document.getElementById('loadMoreBtn');
+    if (loadMoreBtn) {
+        loadMoreBtn.addEventListener('click', function() {
+            currentPage++;
+            loadAnniversaries();
+        });
+    }
+
+    function loadAnniversaries() {
+        fetch(`/api/anniversaries?page=${currentPage}&per_page=${itemsPerPage}`)
+            .then(response => response.json())
+            .then(data => {
+                const listEl = document.getElementById('anniversariesList');
+                
+                if (currentPage === 1) {
+                    listEl.innerHTML = '';
+                }
+                
+                data.items.forEach(item => {
+                    const li = document.createElement('li');
+                    li.className = 'list-group-item d-flex justify-content-between align-items-center';
+                    li.innerHTML = `
+                        <div>
+                            <h5 class="mb-1">${item.title}</h5>
+                            <p class="mb-1 text-muted">${item.date}</p>
+                            <span class="badge bg-danger rounded-pill">${item.days_count} 天</span>
+                        </div>
+                        <div>
+                            <a href="/anniversaries/delete/${item.id}" class="btn btn-sm btn-outline-danger" onclick="return confirm('确定要删除这个纪念日吗？')">删除</a>
+                        </div>
+                    `;
+                    listEl.appendChild(li);
+                });
+                
+                hasMore = data.has_next;
+                loadMoreBtn.style.display = hasMore ? 'inline-block' : 'none';
+            })
+            .catch(error => {
+                console.error('Error loading anniversaries:', error);
+                document.getElementById('anniversariesList').innerHTML = '<li class="list-group-item text-center text-danger">加载失败，请重试</li>';
+            });
+    }
+});
+</script>
+{% endblock %}

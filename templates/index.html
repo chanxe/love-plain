@@ -38,11 +38,10 @@
                     {% endfor %}
                 </ul>
                 
-                {% if total_count > 5 %}
+                <!-- 查看全部纪念日按钮 -->
                 <button id="showMoreBtn" class="btn btn-outline-secondary w-100 mb-2">
                     查看全部 ({{ total_count }})
                 </button>
-                {% endif %}
 
                 <!-- 添加纪念日按钮 -->
                 <button id="addAnniversaryBtn" class="btn btn-outline-danger w-100">
@@ -159,7 +158,7 @@
         const allModalEl = document.getElementById('allAnniversariesModal');
         let allAnniversaries = [];
         let currentPage = 1;
-        const itemsPerPage = 5;
+        const itemsPerPage = 8;  // 每页显示8条
         let currentOrder = 'desc';
 
         if (showMoreBtn && allModalEl) {

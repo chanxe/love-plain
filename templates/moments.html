@@ -14,18 +14,10 @@
         <div class="card border-0 shadow-sm">
             <div class="card-body">
                 <div class="row g-2 align-items-center">
-                    <div class="col-md-6">
+                    <div class="col-md-8">
                         <input type="text" id="searchInput" class="form-control" placeholder="搜索动态内容...">
                     </div>
-                    <div class="col-md-3">
-                        <select id="userFilter" class="form-select">
-                            <option value="">全部发布者</option>
-                            <!-- Users will be populated here if we have an API for users, or hardcoded for now -->
-                            <option value="1">Boy</option>
-                            <option value="2">Girl</option>
-                        </select>
-                    </div>
-                    <div class="col-md-3 d-grid">
+                    <div class="col-md-4 d-grid">
                         <button id="searchBtn" class="btn btn-outline-primary">🔍 搜索</button>
                     </div>
                 </div>
@@ -52,11 +44,11 @@
             <div class="spinner-border text-primary" role="status"></div>
         </div>
         
-        <div id="loadMoreContainer" class="text-center py-4 d-none">
+        <div id="loadMoreContainer" class="text-center py-4 d-none" style="margin-bottom: 80px;">
             <button id="loadMoreBtn" class="btn btn-outline-secondary rounded-pill px-4">加载更多</button>
         </div>
         
-        <div id="noMoreData" class="text-center py-4 text-muted d-none">
+        <div id="noMoreData" class="text-center py-4 text-muted d-none" style="margin-bottom: 80px;">
             没有更多动态了 ~
         </div>
     </div>
@@ -72,13 +64,6 @@
             </div>
             <form action="/moments/add" method="POST" enctype="multipart/form-data">
                 <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">我是谁？</label>
-                        <select name="user_id" class="form-select">
-                            <option value="1">Boy</option>
-                            <option value="2">Girl</option>
-                        </select>
-                    </div>
                     <div class="mb-3">
                         <textarea name="content" class="form-control" rows="4" placeholder="今天发生了什么..." required></textarea>
                     </div>
@@ -106,7 +91,7 @@
                     <h6 class="mb-0 user-name fw-bold"></h6>
                     <small class="text-muted created-at"></small>
                 </div>
-                <div class="ms-auto dropdown">
+                <div class="ms-auto dropdown moment-dropdown">
                      <button class="btn btn-link text-muted p-0" data-bs-toggle="dropdown">•••</button>
                      <ul class="dropdown-menu dropdown-menu-end">
                          <li><a class="dropdown-item text-danger delete-btn" href="#">删除</a></li>
@@ -177,8 +162,34 @@
         const noMoreData = document.getElementById('noMoreData');
         const searchBtn = document.getElementById('searchBtn');
         const searchInput = document.getElementById('searchInput');
-        const userFilter = document.getElementById('userFilter');
         const commentTemplate = document.getElementById('commentItemTemplate');
+        
+        // 获取当前认证用户信息
+        let currentUser = null;
+        fetch('/api/user/info')
+            .then(response => response.json())
+            .then(data => {
+                if (data.code === 200) {
+                    currentUser = data.data;
+                    // 可以在这里更新界面显示当前用户信息
+                    updateCurrentUserUI(currentUser);
+                }
+            })
+            .catch(err => {
+                console.error('Failed to get user info:', err);
+            });
+        
+        // 更新当前用户界面
+        function updateCurrentUserUI(user) {
+            // 例如，在发布按钮附近显示当前用户名
+            const publishModal = document.getElementById('publishModal');
+            const publishForm = publishModal.querySelector('form');
+            // 移除用户选择下拉框，因为我们现在自动使用当前认证用户
+            const userIdSelect = publishForm.querySelector('select[name="user_id"]');
+            if (userIdSelect) {
+                userIdSelect.closest('.mb-3').remove();
+            }
+        }
         
         // Initial Load
         loadMoments();
@@ -209,13 +220,11 @@
             loadMoreContainer.classList.add('d-none');
             
             const keyword = searchInput.value;
-            const userId = userFilter.value;
             
             const params = new URLSearchParams({
                 page: currentPage,
                 per_page: 5, // Load 5 at a time for demo
-                keyword: keyword,
-                user_id: userId
+                keyword: keyword
             });
             
             fetch(`/api/moments?${params}`)
@@ -240,11 +249,17 @@
                                 loadMoreContainer.classList.remove('d-none');
                             }
                         }
+                    } else {
+                        console.error('API Error:', data.msg);
+                        hasMore = false; // Prevent further attempts if API returns error
+                        noMoreData.classList.remove('d-none');
                     }
                 })
                 .catch(err => {
-                    console.error('Error:', err);
-                    alert('加载失败');
+                    console.error('Network Error:', err);
+                    alert('加载失败，请稍后重试');
+                    hasMore = false; // Prevent further attempts if network fails
+                    noMoreData.classList.remove('d-none');
                 })
                 .finally(() => {
                     isLoading = false;
@@ -259,9 +274,15 @@
                 const clone = template.content.cloneNode(true);
                 const card = clone.querySelector('.moment-item');
                 
-                // User Info
-                clone.querySelector('.user-name').textContent = item.publisher.name;
-                clone.querySelector('.user-avatar').src = item.publisher.avatar;
+                // User Info with fallback
+                const userName = item.publisher.name || 'Unknown User';
+                const userAvatar = item.publisher.avatar || '/static/avatars/default.png';
+                
+                clone.querySelector('.user-name').textContent = userName;
+                clone.querySelector('.user-avatar').src = userAvatar;
+                clone.querySelector('.user-avatar').onerror = function() {
+                    this.src = '/static/avatars/default.png';
+                };
                 clone.querySelector('.created-at').textContent = item.created_at;
                 
                 // Content
@@ -273,7 +294,7 @@
                     item.images.forEach(imgSrc => {
                         const col = document.createElement('div');
                         col.className = 'col-4';
-                        col.innerHTML = `<img src="${imgSrc}" class="img-fluid rounded" style="object-fit: cover; width: 100%; height: 100px; cursor: pointer;" onclick="window.open('${imgSrc}')">`;
+                        col.innerHTML = `<img src="${imgSrc}" class="img-fluid rounded" style="object-fit: contain; width: 100%; max-height: 200px; cursor: pointer;" onclick="window.open('${imgSrc}')">`;
                         imgContainer.appendChild(col);
                     });
                 } else {
@@ -292,8 +313,8 @@
                 likeBtn.addEventListener('click', () => {
                     fetch(`/moments/${item.id}/like`, {
                         method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({user_id: 1}) // Simulate current user
+                        headers: {'Content-Type': 'application/json'}
+                        // 不再传递user_id，因为后端会从会话中获取
                     })
                     .then(res => res.json())
                     .then(res => {
@@ -305,20 +326,28 @@
                     });
                 });
                 
-                // Delete
+                // Delete button - only show for current user's posts
                 const deleteBtn = clone.querySelector('.delete-btn');
-                deleteBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    if(confirm('确定删除这条动态吗？')) {
-                        fetch(`/moments/${item.id}/delete`, {method: 'POST'})
-                        .then(res => res.json())
-                        .then(res => {
-                            if(res.code === 200) {
-                                card.remove();
-                            }
-                        });
-                    }
-                });
+                const dropdownMenu = clone.querySelector('.moment-dropdown');
+                if (currentUser && currentUser.id === item.publisher.id) {
+                    // Show dropdown menu for owner's posts
+                    dropdownMenu.style.display = 'block';
+                    deleteBtn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        if(confirm('确定删除这条动态吗？')) {
+                            fetch(`/moments/${item.id}/delete`, {method: 'POST'})
+                            .then(res => res.json())
+                            .then(res => {
+                                if(res.code === 200) {
+                                    card.remove();
+                                }
+                            });
+                        }
+                    });
+                } else {
+                    // Hide dropdown menu for other users' posts
+                    dropdownMenu.style.display = 'none';
+                }
                 
                 // Comments Toggle
                 const commentBtn = clone.querySelector('.comment-btn');
@@ -405,8 +434,8 @@
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({
-                            content: content,
-                            user_id: 1 // Simulate current user
+                            content: content
+                            // 不再传递user_id，因为后端会从会话中获取
                         })
                     })
                     .then(res => res.json())

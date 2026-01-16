@@ -12,8 +12,18 @@ def seed_data():
         # Seed Users
         if User.query.count() == 0:
             print("Seeding Users...")
-            boy = User(name='Boy', avatar='https://cdn-icons-png.flaticon.com/512/4140/4140048.png') # External placeholder
-            girl = User(name='Girl', avatar='https://cdn-icons-png.flaticon.com/512/4140/4140047.png') # External placeholder
+            boy = User(
+                name='Boy', 
+                avatar='https://cdn-icons-png.flaticon.com/512/4140/4140048.png',
+                token='ck',
+                role='male'
+            ) # External placeholder
+            girl = User(
+                name='Girl', 
+                avatar='https://cdn-icons-png.flaticon.com/512/4140/4140047.png',
+                token='wkl',
+                role='female'
+            ) # External placeholder
             db.session.add(boy)
             db.session.add(girl)
             db.session.commit()
