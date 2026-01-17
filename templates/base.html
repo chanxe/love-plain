@@ -10,6 +10,78 @@
         .love-card { transition: transform 0.2s; }
         .love-card:hover { transform: translateY(-5px); }
         .navbar-brand { font-weight: bold; }
+        .bg-gradient-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        
+        .btn-outline-primary:hover, .btn-outline-secondary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .btn-outline-primary:active, .btn-outline-secondary:active {
+            transform: translateY(0);
+            box-shadow: none;
+        }
+        
+        .btn-outline-primary:focus, .btn-outline-secondary:focus {
+            box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+        }
+        
+        .list-group-item {
+            transition: background-color 0.2s;
+        }
+        
+        .list-group-item:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .pinned-moment-card {
+            background: linear-gradient(135deg, #fff9c4 0%, #fff 100%);
+            border: 2px solid #ffc107 !important;
+            transition: all 0.3s ease;
+        }
+        
+        .pinned-moment-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 12px rgba(255, 193, 7, 0.3);
+        }
+        
+        .unpin-btn {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.875rem;
+            transition: all 0.2s;
+        }
+        
+        .unpin-btn:hover {
+            background-color: #ffc107;
+            color: #000;
+        }
+        
+        .moment-item.pinned-moment-card {
+            background: linear-gradient(135deg, #fff9c4 0%, #fff 100%);
+            border: 2px solid #ffc107 !important;
+        }
+        
+        .moment-item.pinned-moment-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 12px rgba(255, 193, 7, 0.3);
+        }
+        
+        @media (max-width: 768px) {
+            .container { padding: 0 15px; }
+            .card { border-radius: 12px; }
+            .btn { border-radius: 8px; }
+            .fixed-bottom { margin-bottom: 70px !important; }
+            .moment-item { border-radius: 12px; }
+            #loveOneDayCard { border-radius: 12px; }
+            .badge { font-size: 0.75rem; }
+        }
+        
+        @media (max-width: 576px) {
+            .display-5 { font-size: 2rem; }
+            .h3 { font-size: 1.5rem; }
+            .btn-primary.rounded-circle { width: 50px; height: 50px; }
+            .btn-primary.rounded-circle .h3 { font-size: 1.25rem; }
+        }
     </style>
 </head>
 <body>
@@ -22,8 +94,6 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto">
                     <li class="nav-item"><a class="nav-link" href="/">首页</a></li>
-                    <li class="nav-item"><a class="nav-link" href="/moments">日常动态</a></li>
-                    <li class="nav-item"><a class="nav-link" href="/chat">亲密聊天</a></li>
                     <li class="nav-item"><a class="nav-link" href="/logout">登出</a></li>
                 </ul>
             </div>

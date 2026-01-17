@@ -3,3 +3,5 @@ Flask-SQLAlchemy
 Flask-SocketIO
 python-socketio
 python-dotenv
+requests
+edge-tts>=6.1.0

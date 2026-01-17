@@ -81,6 +81,15 @@ graph TD
 - **输出**: 实时推送到对方屏幕。
 - **技术实现**: WebSocket 全双工通信。
 
+### 3.4 爱的一天模块 (Love One Day)
+- **功能说明**: AI 智能生成每日播报，回顾历史动态和纪念日。
+- **输入**: 历史动态数据、纪念日数据、当前日期。
+- **输出**: 每日播报文本、语音播报文件。
+- **技术实现**: 
+  - 使用阿里云百炼 API (Qwen 模型) 生成播报内容
+  - 使用 Edge-TTS 生成语音播报
+  - 数据库缓存每日播报，避免重复生成
+
 ---
 
 ## 4. 接口规范
@@ -319,7 +328,214 @@ graph TD
 
 ---
 
-## 9. 文档维护机制
+## 10. 爱的一天模块详解 (Love One Day Specs)
+
+### 10.1 功能概述
+爱的一天模块是系统的核心功能之一，通过 AI 智能分析历史数据和纪念日，生成个性化的每日播报，帮助情侣回顾美好时光。
+
+- **智能播报生成**: 基于历史动态、纪念日等数据，AI 生成温馨的每日播报内容
+- **语音播报**: 支持将播报文本转换为语音，提供更好的听觉体验
+- **历史回顾**: 自动识别历史上的今天（往年同一天）的重要事件和动态
+- **缓存机制**: 每日播报缓存到数据库，避免重复生成，提升性能
+- **定时推送**: 支持定时任务自动生成播报并推送给用户
+
+### 10.2 业务流程
+
+#### 10.2.1 播报生成流程
+1. **数据收集**: 收集今日的纪念日、历史动态、历史趣事等数据
+2. **AI 生成**: 调用阿里云百炼 API，根据收集的数据生成播报内容
+3. **内容限制**: 严格控制生成内容在 100 字以内，确保界面显示效果
+4. **语音合成**: 使用 Edge-TTS 将播报文本转换为语音文件
+5. **数据存储**: 将播报内容和语音文件路径保存到数据库
+6. **前端展示**: 首页自动加载今日播报，用户可查看或播放语音
+
+#### 10.2.2 播报类型
+- **纪念日播报**: 今天是某个重要纪念日，生成祝福和回顾
+- **历史日常播报**: 历史上今天有超过 3 条动态，生成怀旧回顾
+- **历史趣事播报**: 历史上今天有有趣的动态，生成趣味回顾
+- **综合播报**: 结合多种数据类型，生成综合性播报
+
+### 10.3 数据库模型
+
+#### LoveOneDayReport 表
+```python
+class LoveOneDayReport(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    report_date = db.Column(db.Date, unique=True, nullable=False, index=True)
+    content = db.Column(db.Text, nullable=False)
+    broadcast_type = db.Column(db.String(50), nullable=False)
+    audio_url = db.Column(db.String(500))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    is_pushed = db.Column(db.Boolean, default=False)
+```
+
+**字段说明**:
+- `report_date`: 播报日期，设置唯一索引确保每天只有一条播报
+- `content`: 播报内容文本，最多 100 字
+- `broadcast_type`: 播报类型（anniversary/historical_events/historical_moments）
+- `audio_url`: 语音文件路径
+- `is_pushed`: 是否已通过定时任务推送
+
+### 10.4 接口定义 (API Definitions)
+
+#### 10.4.1 获取今日播报
+- **URL**: `GET /api/love-one-day/today`
+- **Description**: 获取今日播报内容，优先从缓存读取
+- **Response**:
+```json
+{
+  "code": 200,
+  "msg": "success",
+  "data": {
+    "id": 1,
+    "text": "今天是我们的纪念日，回想起来真是美好...",
+    "date": "2026年01月17日",
+    "broadcast_type": "anniversary",
+    "audio_url": "/static/reports/love_one_day_report_20260117.mp3",
+    "created_at": "2026-01-17 06:00:00"
+  }
+}
+```
+
+#### 10.4.2 生成语音播报
+- **URL**: `POST /api/love-one-day/tts`
+- **Description**: 将播报文本转换为语音文件
+- **Request Body**:
+```json
+{
+  "text": "播报内容文本",
+  "report_id": 1
+}
+```
+- **Response**:
+```json
+{
+  "code": 200,
+  "msg": "success",
+  "data": {
+    "audio_url": "/static/reports/love_one_day_report_20260117.mp3"
+  }
+}
+```
+
+#### 10.4.3 获取历史播报列表
+- **URL**: `GET /api/love-one-day/history`
+- **Description**: 获取历史播报列表，支持分页
+- **Query Parameters**:
+  - `page`: 页码（默认 1）
+  - `per_page`: 每页数量（默认 10）
+- **Response**:
+```json
+{
+  "code": 200,
+  "msg": "success",
+  "data": {
+    "items": [
+      {
+        "id": 1,
+        "text": "播报内容...",
+        "date": "2026年01月17日",
+        "broadcast_type": "anniversary",
+        "audio_url": "/static/reports/xxx.mp3"
+      }
+    ],
+    "pagination": {
+      "current_page": 1,
+      "total_pages": 10,
+      "total_items": 100,
+      "has_next": true,
+      "has_prev": false
+    }
+  }
+}
+```
+
+### 10.5 AI 服务配置
+
+#### 10.5.1 环境变量
+```env
+BAILIAN_API_KEY=sk-bacb58fe4db14cef836c2767adbfad46
+BAILIAN_ENDPOINT=https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+BAILIAN_MODEL=qwen-max
+BAILIAN_TEMPERATURE=0.8
+BAILIAN_MAX_TOKENS=150
+```
+
+#### 10.5.2 Prompt 设计
+- **纪念日模式**: 简化 prompt，直接要求生成 100 字以内的播报
+- **历史日常模式**: 简化 prompt，聚焦怀旧情感
+- **历史趣事模式**: 简化 prompt，突出趣味性
+
+#### 10.5.3 内容长度控制
+```python
+# 在 API 调用中设置 max_tokens 参数
+payload = {
+    "max_tokens": 150,  # 限制 token 数量
+}
+
+# 在返回结果中截断内容
+content = result['choices'][0]['message']['content'].strip()
+return content[:100] if len(content) > 100 else content
+```
+
+### 10.6 性能优化
+
+#### 10.6.1 数据库索引
+```python
+# LoveOneDayReport 表
+__table_args__ = (
+    db.Index('idx_report_date', 'report_date'),
+)
+```
+
+#### 10.6.2 缓存策略
+- **数据库缓存**: 每日播报存储在数据库，避免重复生成
+- **前端缓存**: 播报内容在页面加载时获取，避免频繁请求
+- **音频缓存**: 生成的音频文件保存在服务器，可重复播放
+
+### 10.7 定时任务
+```python
+def schedule_daily_broadcast():
+    def broadcast_worker():
+        while True:
+            now = datetime.now()
+            today = date.today()
+            
+            if now.hour == 6 and now.minute == 0:
+                with app.app_context():
+                    existing_report = LoveOneDayReport.query.filter_by(report_date=today).first()
+                    
+                    if not existing_report:
+                        # 生成今日播报
+                        data = LoveOneDayService.collect_daily_data()
+                        report_text = LoveOneDayService.generate_love_broadcast(data)
+                        
+                        # 保存到数据库
+                        new_report = LoveOneDayReport(
+                            report_date=today,
+                            content=report_text,
+                            broadcast_type=broadcast_type,
+                            is_pushed=True
+                        )
+                        db.session.add(new_report)
+                        db.session.commit()
+                        
+                        # WebSocket 推送
+                        socketio.emit('love_one_day_broadcast', {...}, room='couple_room')
+            
+            time.sleep(60)
+```
+
+### 10.8 异常处理
+- **API 调用失败**: 捕获异常，返回友好的错误提示
+- **语音生成失败**: 提供重试机制，或使用默认语音
+- **数据库错误**: 记录日志，返回空数据
+- **网络超时**: 设置合理的超时时间，避免长时间等待
+
+---
+
+## 11. 文档维护机制
 
 - **版本控制**: 文档随代码仓库 (`Git`) 一同管理，位于项目根目录。
 - **同步机制**: 每次架构调整或新增模块时，需在 Pull Request 中更新本文档。
+- **更新频率**: 每次重大功能更新后，及时更新相关章节。

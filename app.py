@@ -10,6 +10,10 @@ load_dotenv()
 
 import json
 from werkzeug.utils import secure_filename
+import threading
+import time
+
+# Import AI Service (imported later to avoid circular dependency)
 
 # Initialize App
 app = Flask(__name__)
@@ -48,13 +52,20 @@ class Anniversary(db.Model):
 class Moment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     content = db.Column(db.Text, nullable=False)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    images_json = db.Column(db.Text, default='[]') # Store images as JSON string
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    images_json = db.Column(db.Text, default='[]')
+    is_pinned = db.Column(db.Boolean, default=False, nullable=False)
 
     user = db.relationship('User', backref=db.backref('moments', lazy=True))
     comments = db.relationship('Comment', backref='moment', lazy=True, cascade="all, delete-orphan")
     likes = db.relationship('Like', backref='moment', lazy=True, cascade="all, delete-orphan")
+
+    __table_args__ = (
+        db.Index('idx_moments_timestamp', 'timestamp'),
+        db.Index('idx_moments_user_id', 'user_id'),
+        db.Index('idx_moments_is_pinned', 'is_pinned'),
+    )
 
     @property
     def images(self):
@@ -67,24 +78,51 @@ class Moment(db.Model):
 class Comment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     content = db.Column(db.Text, nullable=False)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    moment_id = db.Column(db.Integer, db.ForeignKey('moment.id'), nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    moment_id = db.Column(db.Integer, db.ForeignKey('moment.id'), nullable=False, index=True)
     
     user = db.relationship('User', backref=db.backref('comments', lazy=True))
 
+    __table_args__ = (
+        db.Index('idx_comments_moment_id', 'moment_id'),
+        db.Index('idx_comments_timestamp', 'timestamp'),
+    )
+
 class Like(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    moment_id = db.Column(db.Integer, db.ForeignKey('moment.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    moment_id = db.Column(db.Integer, db.ForeignKey('moment.id'), nullable=False, index=True)
+
+    __table_args__ = (
+        db.Index('idx_likes_user_moment', 'user_id', 'moment_id', unique=True),
+    )
 
 class Message(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     content = db.Column(db.Text, nullable=False)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     
     sender = db.relationship('User', backref=db.backref('messages', lazy=True))
+
+    __table_args__ = (
+        db.Index('idx_messages_timestamp', 'timestamp'),
+        db.Index('idx_messages_sender_id', 'sender_id'),
+    )
+
+class LoveOneDayReport(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    report_date = db.Column(db.Date, unique=True, nullable=False, index=True)
+    content = db.Column(db.Text, nullable=False)
+    broadcast_type = db.Column(db.String(50), nullable=False)
+    audio_url = db.Column(db.String(500))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    is_pushed = db.Column(db.Boolean, default=False)
+    
+    __table_args__ = (
+        db.Index('idx_report_date', 'report_date'),
+    )
 
 # Authentication Functions and Decorators
 from functools import wraps
@@ -130,7 +168,21 @@ def index():
         func.julianday(Anniversary.date) - func.julianday(today)
     ).limit(2).all()
     total_count = Anniversary.query.count()
-    return render_template('index.html', anniversaries=important_anniversaries, total_count=total_count)
+    
+    # Fetch pinned moments (max 3)
+    current_user = get_current_user()
+    if current_user:
+        pinned_moments = Moment.query.filter_by(
+            user_id=current_user.id, 
+            is_pinned=True
+        ).order_by(Moment.timestamp.desc()).limit(3).all()
+    else:
+        pinned_moments = []
+    
+    return render_template('index.html', 
+                      anniversaries=important_anniversaries, 
+                      total_count=total_count,
+                      pinned_moments=pinned_moments)
 
 @app.route('/api/anniversaries')
 @login_required
@@ -259,7 +311,7 @@ def get_moments():
     
     query = Moment.query.options(
         db.joinedload(Moment.user)  # 预加载用户数据
-    ).order_by(Moment.timestamp.desc())
+    ).order_by(Moment.is_pinned.desc(), Moment.timestamp.desc())
     
     if user_id:
         query = query.filter_by(user_id=user_id)
@@ -283,6 +335,7 @@ def get_moments():
             'id': m.id,
             'content': m.content,
             'images': m.images,
+            'is_pinned': m.is_pinned,
             'publisher': {
                 'id': m.user.id,
                 'name': m.user.name or 'Unknown User',
@@ -355,6 +408,47 @@ def delete_moment(id):
         return {'code': 403, 'msg': 'Permission denied'}, 403
     
     db.session.delete(moment)
+    db.session.commit()
+    return {'code': 200, 'msg': 'success'}
+
+@app.route('/moments/<int:id>/pin', methods=['POST'])
+@login_required
+def pin_moment(id):
+    moment = Moment.query.get_or_404(id)
+    current_user = get_current_user()
+    if not current_user:
+        return {'code': 401, 'msg': 'Authentication required'}, 401
+    
+    # Only allow the publisher to pin their own moment
+    if moment.user_id != current_user.id:
+        return {'code': 403, 'msg': 'Permission denied'}, 403
+    
+    # Check if already pinned
+    if moment.is_pinned:
+        return {'code': 400, 'msg': 'Already pinned'}, 400
+    
+    # Check pinned count limit (max 3)
+    pinned_count = Moment.query.filter_by(user_id=current_user.id, is_pinned=True).count()
+    if pinned_count >= 3:
+        return {'code': 400, 'msg': '最多只能置顶3条日常'}, 400
+    
+    moment.is_pinned = True
+    db.session.commit()
+    return {'code': 200, 'msg': 'success'}
+
+@app.route('/moments/<int:id>/unpin', methods=['POST'])
+@login_required
+def unpin_moment(id):
+    moment = Moment.query.get_or_404(id)
+    current_user = get_current_user()
+    if not current_user:
+        return {'code': 401, 'msg': 'Authentication required'}, 401
+    
+    # Only allow the publisher to unpin their own moment
+    if moment.user_id != current_user.id:
+        return {'code': 403, 'msg': 'Permission denied'}, 403
+    
+    moment.is_pinned = False
     db.session.commit()
     return {'code': 200, 'msg': 'success'}
 
@@ -564,8 +658,274 @@ def on_recall(data):
         db.session.commit()
         emit('message_recalled', {'id': msg_id}, room=room)
 
+@app.route('/love-one-day')
+@login_required
+def love_one_day():
+    return redirect(url_for('index'))
+
+@app.route('/api/love-one-day/today', methods=['GET'])
+@login_required
+def get_today_love_one_day():
+    try:
+        today = date.today()
+        
+        with app.app_context():
+            existing_report = LoveOneDayReport.query.filter_by(report_date=today).first()
+            
+            if existing_report:
+                return {
+                    'code': 200,
+                    'msg': 'success',
+                    'data': {
+                        'id': existing_report.id,
+                        'text': existing_report.content,
+                        'date': existing_report.report_date.strftime('%Y年%m月%d日'),
+                        'broadcast_type': existing_report.broadcast_type,
+                        'audio_url': existing_report.audio_url,
+                        'created_at': existing_report.created_at.strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                }
+            
+            from ai_service import LoveOneDayService
+            data = LoveOneDayService.collect_daily_data()
+            report_text = LoveOneDayService.generate_love_broadcast(data)
+            
+            broadcast_type = 'anniversary' if data['today_anniversaries'] else 'historical_moments' if data['historical_moments'] else 'historical_events'
+            
+            new_report = LoveOneDayReport(
+                report_date=today,
+                content=report_text,
+                broadcast_type=broadcast_type
+            )
+            db.session.add(new_report)
+            db.session.commit()
+            
+            return {
+                'code': 200,
+                'msg': 'success',
+                'data': {
+                    'id': new_report.id,
+                    'text': new_report.content,
+                    'date': new_report.report_date.strftime('%Y年%m月%d日'),
+                    'broadcast_type': new_report.broadcast_type,
+                    'audio_url': new_report.audio_url,
+                    'created_at': new_report.created_at.strftime('%Y-%m-%d %H:%M:%S')
+                }
+            }
+    except Exception as e:
+        print(f"Error getting today's love one day report: {e}")
+        return {
+            'code': 500,
+            'msg': f'获取播报失败: {str(e)}'
+        }, 500
+
+@app.route('/api/love-one-day/generate', methods=['POST'])
+@login_required
+def generate_love_one_day_report():
+    try:
+        today = date.today()
+        
+        with app.app_context():
+            existing_report = LoveOneDayReport.query.filter_by(report_date=today).first()
+            
+            if existing_report:
+                return {
+                    'code': 200,
+                    'msg': 'success',
+                    'data': {
+                        'id': existing_report.id,
+                        'text': existing_report.content,
+                        'date': existing_report.report_date.strftime('%Y年%m月%d日'),
+                        'broadcast_type': existing_report.broadcast_type,
+                        'audio_url': existing_report.audio_url,
+                        'created_at': existing_report.created_at.strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                }
+            
+            from ai_service import LoveOneDayService
+            data = LoveOneDayService.collect_daily_data()
+            report_text = LoveOneDayService.generate_love_broadcast(data)
+            
+            broadcast_type = 'anniversary' if data['today_anniversaries'] else 'historical_moments' if data['historical_moments'] else 'historical_events'
+            
+            new_report = LoveOneDayReport(
+                report_date=today,
+                content=report_text,
+                broadcast_type=broadcast_type
+            )
+            db.session.add(new_report)
+            db.session.commit()
+            
+            return {
+                'code': 200,
+                'msg': 'success',
+                'data': {
+                    'id': new_report.id,
+                    'text': new_report.content,
+                    'date': new_report.report_date.strftime('%Y年%m月%d日'),
+                    'broadcast_type': new_report.broadcast_type,
+                    'audio_url': new_report.audio_url,
+                    'created_at': new_report.created_at.strftime('%Y-%m-%d %H:%M:%S')
+                }
+            }
+    except Exception as e:
+        print(f"Error generating love one day report: {e}")
+        return {
+            'code': 500,
+            'msg': f'生成播报失败: {str(e)}'
+        }, 500
+
+@app.route('/api/love-one-day/tts', methods=['POST'])
+@login_required
+def generate_love_one_day_tts():
+    text = request.json.get('text')
+    report_id = request.json.get('report_id')
+    if not text:
+        return {'code': 400, 'msg': 'Text is required'}, 400
+    
+    try:
+        from ai_service import LoveOneDayService
+        reports_dir = os.path.join(app.root_path, 'static', 'reports')
+        os.makedirs(reports_dir, exist_ok=True)
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_file = os.path.join(reports_dir, f'love_one_day_report_{timestamp}.mp3')
+        
+        audio_file = LoveOneDayService.text_to_speech(text, output_file)
+        if audio_file:
+            rel_path = os.path.relpath(audio_file, app.root_path)
+            audio_url = '/' + rel_path.replace('\\', '/')
+            
+            if report_id:
+                with app.app_context():
+                    report = LoveOneDayReport.query.get(report_id)
+                    if report:
+                        report.audio_url = audio_url
+                        db.session.commit()
+            
+            return {
+                'code': 200,
+                'msg': 'success',
+                'data': {
+                    'audio_url': audio_url
+                }
+            }
+        else:
+            return {
+                'code': 500,
+                'msg': '语音生成失败'
+            }, 500
+    except Exception as e:
+        print(f"TTS Error: {e}")
+        return {
+            'code': 500,
+            'msg': f'语音生成失败: {str(e)}'
+        }, 500
+
+def schedule_daily_broadcast():
+    def broadcast_worker():
+        while True:
+            now = datetime.now()
+            today = date.today()
+            
+            if now.hour == 6 and now.minute == 0:
+                print(f"⏰ 爱的一天定时推送: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+                
+                try:
+                    with app.app_context():
+                        existing_report = LoveOneDayReport.query.filter_by(report_date=today).first()
+                        
+                        if not existing_report:
+                            from ai_service import LoveOneDayService
+                            data = LoveOneDayService.collect_daily_data()
+                            report_text = LoveOneDayService.generate_love_broadcast(data)
+                            
+                            broadcast_type = 'anniversary' if data['today_anniversaries'] else 'historical_moments' if data['historical_moments'] else 'historical_events'
+                            
+                            new_report = LoveOneDayReport(
+                                report_date=today,
+                                content=report_text,
+                                broadcast_type=broadcast_type,
+                                is_pushed=True
+                            )
+                            db.session.add(new_report)
+                            db.session.commit()
+                            
+                            print(f"✅ 爱的一天播报已生成: {report_text[:100]}...")
+                            
+                            socketio.emit('love_one_day_broadcast', {
+                                'id': new_report.id,
+                                'text': new_report.content,
+                                'date': new_report.report_date.strftime('%Y年%m月%d日'),
+                                'broadcast_type': new_report.broadcast_type
+                            }, room='couple_room')
+                        else:
+                            print(f"ℹ️ 今日播报已存在，跳过生成")
+                except Exception as e:
+                    print(f"❌ 爱的一天定时推送失败: {e}")
+            
+            time.sleep(60)
+    
+    scheduler_thread = threading.Thread(target=broadcast_worker, daemon=True)
+    scheduler_thread.start()
+
+@app.route('/api/love-one-day/history', methods=['GET'])
+@login_required
+def get_love_one_day_history():
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+        order = request.args.get('order', 'desc', type=str)
+        keyword = request.args.get('keyword', '', type=str)
+        
+        query = LoveOneDayReport.query
+        
+        if keyword:
+            query = query.filter(LoveOneDayReport.content.contains(keyword))
+        
+        if order == 'asc':
+            query = query.order_by(LoveOneDayReport.report_date.asc())
+        else:
+            query = query.order_by(LoveOneDayReport.report_date.desc())
+        
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+        
+        items = [{
+            'id': r.id,
+            'text': r.content,
+            'date': r.report_date.strftime('%Y年%m月%d日'),
+            'broadcast_type': r.broadcast_type,
+            'audio_url': r.audio_url,
+            'created_at': r.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            'is_pushed': r.is_pushed
+        } for r in pagination.items]
+        
+        return {
+            'code': 200,
+            'msg': 'success',
+            'data': {
+                'items': items,
+                'total': pagination.total,
+                'pagination': {
+                    'current_page': page,
+                    'total_pages': pagination.pages,
+                    'total_items': pagination.total,
+                    'has_next': pagination.has_next,
+                    'has_prev': pagination.has_prev
+                }
+            }
+        }
+    except Exception as e:
+        print(f"Error getting love one day history: {e}")
+        return {
+            'code': 500,
+            'msg': f'获取历史播报失败: {str(e)}'
+        }, 500
+
 # Run
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
+    # Start daily broadcast scheduler
+    schedule_daily_broadcast()
     socketio.run(app, debug=True, allow_unsafe_werkzeug=True)

@@ -139,3 +139,7 @@ cython_debug/
 .vscode/
 *.swp
 *.swo
+
+# Generated static files
+static/reports/*.mp3
+static/uploads/*

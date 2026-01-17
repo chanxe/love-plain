@@ -8,6 +8,68 @@
     </div>
 </div>
 
+<!-- Love One Day Broadcast Section -->
+<div class="row mb-4 justify-content-center">
+    <div class="col-md-8">
+        <div class="card love-card border-0 shadow-sm" id="loveOneDayCard">
+            <div class="card-body">
+                <!-- 顶部菜单栏 -->
+                <div class="d-flex align-items-center justify-content-between mb-3 pb-2 border-bottom">
+                    <div class="d-flex align-items-center">
+                        <span class="me-2">💕</span>
+                        <h5 class="mb-0 fw-bold">爱的一天</h5>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button id="refreshBroadcastBtn" class="btn btn-sm btn-outline-primary" title="刷新播报">
+                            🔄 刷新
+                        </button>
+                        <button id="viewHistoryBtn" class="btn btn-sm btn-outline-secondary" title="查看历史播报">
+                            📅 历史
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 播报内容 -->
+                <div id="broadcastContent" class="mb-3" style="white-space: pre-wrap; line-height: 1.6; font-size: 0.95rem; min-height: 120px;"></div>
+                <div id="broadcastLoading" class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="text-muted mt-2 small">正在加载...</p>
+                </div>
+                <div id="broadcastError" class="alert alert-danger d-none small">
+                    <p class="mb-0">加载失败，请稍后重试</p>
+                </div>
+                
+                <!-- 操作按钮 -->
+                <button id="playAudioBtn" class="btn btn-outline-secondary w-100">🔊 播放语音</button>
+                <audio id="broadcastAudio" controls class="w-100 d-none mt-2"></audio>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .moment-item {
+        position: relative;
+    }
+    
+    .pinned-badge-container {
+        z-index: 10;
+    }
+    
+    @media (max-width: 768px) {
+        #broadcastContent { font-size: 0.95rem; }
+        #loveOneDayCard .card-body { padding: 1rem; }
+        .badge { padding: 0.5rem 0.75rem; }
+    }
+    
+    @media (max-width: 576px) {
+        #broadcastContent { font-size: 0.9rem; }
+        #loveOneDayCard .card-body { padding: 0.75rem; }
+        .badge { padding: 0.4rem 0.6rem; font-size: 0.7rem; }
+        .dropdown-menu { min-width: 150px; }
+    }
+</style>
+
 <!-- Search & Filter Bar -->
 <div class="row mb-4 justify-content-center">
     <div class="col-md-8">
@@ -85,6 +147,11 @@
 <template id="momentTemplate">
     <div class="card mb-4 shadow-sm border-0 moment-item">
         <div class="card-body">
+            <!-- Pinned Badge -->
+            <div class="pinned-badge-container position-absolute top-0 start-0 m-2" style="display: none;">
+                <span class="badge bg-warning text-dark">📌 置顶</span>
+            </div>
+            
             <div class="d-flex align-items-center mb-3">
                 <img src="" class="rounded-circle me-2 user-avatar" width="40" height="40" alt="Avatar">
                 <div>
@@ -94,6 +161,9 @@
                 <div class="ms-auto dropdown moment-dropdown">
                      <button class="btn btn-link text-muted p-0" data-bs-toggle="dropdown">•••</button>
                      <ul class="dropdown-menu dropdown-menu-end">
+                         <li><a class="dropdown-item pin-btn" href="#">📌 置顶</a></li>
+                         <li><a class="dropdown-item unpin-btn d-none" href="#">✕ 取消置顶</a></li>
+                         <li><hr class="dropdown-divider"></li>
                          <li><a class="dropdown-item text-danger delete-btn" href="#">删除</a></li>
                      </ul>
                 </div>
@@ -147,6 +217,37 @@
     </div>
 </template>
 
+<!-- Modal: 查看历史播报 -->
+<div class="modal fade" id="historyModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-scrollable modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">📅 爱的一天历史播报</h5>
+                <div class="ms-auto me-2 d-flex gap-2">
+                    <select id="historySortOrder" class="form-select form-select-sm">
+                        <option value="desc">时间倒序</option>
+                        <option value="asc">时间正序</option>
+                    </select>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <input type="text" id="historySearchInput" class="form-control" placeholder="搜索播报内容...">
+                </div>
+                <div id="historyList" class="list-group list-group-flush">
+                    <!-- Content loaded via JS -->
+                </div>
+            </div>
+            <div class="modal-footer justify-content-between">
+                <button id="historyPrevPage" class="btn btn-sm btn-outline-secondary" disabled>上一页</button>
+                <span id="historyPageInfo" class="small text-muted">第 1 页</span>
+                <button id="historyNextPage" class="btn btn-sm btn-outline-secondary" disabled>下一页</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -164,14 +265,13 @@
         const searchInput = document.getElementById('searchInput');
         const commentTemplate = document.getElementById('commentItemTemplate');
         
-        // 获取当前认证用户信息
-        let currentUser = null;
+        let currentBroadcast = null;
+        
         fetch('/api/user/info')
             .then(response => response.json())
             .then(data => {
                 if (data.code === 200) {
                     currentUser = data.data;
-                    // 可以在这里更新界面显示当前用户信息
                     updateCurrentUserUI(currentUser);
                 }
             })
@@ -179,20 +279,241 @@
                 console.error('Failed to get user info:', err);
             });
         
-        // 更新当前用户界面
         function updateCurrentUserUI(user) {
-            // 例如，在发布按钮附近显示当前用户名
             const publishModal = document.getElementById('publishModal');
             const publishForm = publishModal.querySelector('form');
-            // 移除用户选择下拉框，因为我们现在自动使用当前认证用户
             const userIdSelect = publishForm.querySelector('select[name="user_id"]');
             if (userIdSelect) {
                 userIdSelect.closest('.mb-3').remove();
             }
         }
         
+        loadLoveOneDayBroadcast();
+        
+        function loadLoveOneDayBroadcast() {
+            const broadcastContent = document.getElementById('broadcastContent');
+            const broadcastLoading = document.getElementById('broadcastLoading');
+            const broadcastError = document.getElementById('broadcastError');
+            const broadcastAudio = document.getElementById('broadcastAudio');
+            
+            broadcastLoading.classList.remove('d-none');
+            broadcastContent.classList.add('d-none');
+            broadcastError.classList.add('d-none');
+            broadcastAudio.classList.add('d-none');
+            
+            fetch('/api/love-one-day/today')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.code === 200) {
+                        currentBroadcast = data.data;
+                        broadcastContent.textContent = data.data.text;
+                        broadcastLoading.classList.add('d-none');
+                        broadcastContent.classList.remove('d-none');
+                        
+                        if (data.data.audio_url) {
+                            broadcastAudio.src = data.data.audio_url;
+                            broadcastAudio.classList.remove('d-none');
+                        }
+                    } else {
+                        broadcastLoading.classList.add('d-none');
+                        broadcastError.classList.remove('d-none');
+                    }
+                })
+                .catch(err => {
+                    console.error('Failed to load love one day broadcast:', err);
+                    broadcastLoading.classList.add('d-none');
+                    broadcastError.classList.remove('d-none');
+                });
+        }
+        
+        document.getElementById('refreshBroadcastBtn').addEventListener('click', function(e) {
+            e.preventDefault();
+            loadLoveOneDayBroadcast();
+        });
+        
+        document.getElementById('viewHistoryBtn').addEventListener('click', function(e) {
+            e.preventDefault();
+            loadLoveOneDayHistory();
+        });
+        
+        let historyData = [];
+        let historyCurrentPage = 1;
+        let historyCurrentOrder = 'desc';
+        let historySearchKeyword = '';
+        const historyItemsPerPage = 10;
+        
+        function loadLoveOneDayHistory() {
+            const historyModal = new bootstrap.Modal(document.getElementById('historyModal'));
+            historyModal.show();
+            fetchHistoryData();
+        }
+        
+        function fetchHistoryData() {
+            const historyList = document.getElementById('historyList');
+            historyList.innerHTML = '<div class="text-center p-3"><div class="spinner-border text-primary" role="status"></div></div>';
+            
+            let url = `/api/love-one-day/history?page=${historyCurrentPage}&per_page=${historyItemsPerPage}&order=${historyCurrentOrder}`;
+            if (historySearchKeyword) {
+                url += `&keyword=${encodeURIComponent(historySearchKeyword)}`;
+            }
+            
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.code === 200) {
+                        historyData = data.data.items;
+                        renderHistoryList(data.data);
+                    } else {
+                        historyList.innerHTML = '<div class="text-center text-danger">加载失败，请重试</div>';
+                    }
+                })
+                .catch(err => {
+                    console.error('Failed to load history:', err);
+                    historyList.innerHTML = '<div class="text-center text-danger">加载失败，请重试</div>';
+                });
+        }
+        
+        function renderHistoryList(data) {
+            const historyList = document.getElementById('historyList');
+            const totalPages = Math.ceil(data.total / historyItemsPerPage);
+            
+            if (data.items.length === 0) {
+                historyList.innerHTML = '<div class="text-center text-muted p-4">暂无历史播报</div>';
+                document.getElementById('historyPageInfo').textContent = '第 0 / 0 页';
+                document.getElementById('historyPrevPage').disabled = true;
+                document.getElementById('historyNextPage').disabled = true;
+                return;
+            }
+            
+            let html = '';
+            data.items.forEach(item => {
+                const typeBadge = getBroadcastTypeBadge(item.broadcast_type);
+                html += `
+                    <div class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div>
+                                <span class="badge bg-secondary mb-1">${item.date}</span>
+                                ${typeBadge}
+                            </div>
+                            <small class="text-muted">${item.created_at}</small>
+                        </div>
+                        <p class="mb-0" style="white-space: pre-wrap; line-height: 1.6;">${item.text}</p>
+                    </div>
+                `;
+            });
+            
+            historyList.innerHTML = html;
+            document.getElementById('historyPageInfo').textContent = `第 ${historyCurrentPage} / ${totalPages} 页`;
+            document.getElementById('historyPrevPage').disabled = historyCurrentPage === 1;
+            document.getElementById('historyNextPage').disabled = historyCurrentPage >= totalPages;
+        }
+        
+        function getBroadcastTypeBadge(type) {
+            const typeMap = {
+                'anniversary': '<span class="badge bg-danger">💕 纪念日</span>',
+                'historical_moments': '<span class="badge bg-info">📸 历史日常</span>',
+                'historical_events': '<span class="badge bg-warning">🗓️ 历史趣事</span>'
+            };
+            return typeMap[type] || '<span class="badge bg-secondary">未知</span>';
+        }
+        
+        document.getElementById('historySortOrder').addEventListener('change', function(e) {
+            historyCurrentOrder = e.target.value;
+            historyCurrentPage = 1;
+            fetchHistoryData();
+        });
+        
+        document.getElementById('historySearchInput').addEventListener('input', function(e) {
+            historySearchKeyword = e.target.value.trim();
+            historyCurrentPage = 1;
+            fetchHistoryData();
+        });
+        
+        document.getElementById('historyPrevPage').addEventListener('click', function() {
+            if (historyCurrentPage > 1) {
+                historyCurrentPage--;
+                fetchHistoryData();
+            }
+        });
+        
+        document.getElementById('historyNextPage').addEventListener('click', function() {
+            historyCurrentPage++;
+            fetchHistoryData();
+        });
+        
+        document.getElementById('playAudioBtn').addEventListener('click', function(e) {
+            e.preventDefault();
+            const broadcastAudio = document.getElementById('broadcastAudio');
+            if (currentBroadcast && currentBroadcast.audio_url) {
+                broadcastAudio.play();
+            } else if (currentBroadcast) {
+                generateAudio(currentBroadcast);
+            } else {
+                alert('请先加载播报内容');
+            }
+        });
+        
+        function generateAudio(broadcast) {
+            const playAudioBtn = document.getElementById('playAudioBtn');
+            playAudioBtn.textContent = '🔊 生成中...';
+            playAudioBtn.disabled = true;
+            
+            fetch('/api/love-one-day/tts', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    text: broadcast.text,
+                    report_id: broadcast.id
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.code === 200) {
+                    currentBroadcast.audio_url = data.data.audio_url;
+                    const broadcastAudio = document.getElementById('broadcastAudio');
+                    broadcastAudio.src = data.data.audio_url;
+                    broadcastAudio.classList.remove('d-none');
+                    broadcastAudio.play();
+                } else {
+                    alert('语音生成失败: ' + data.msg);
+                }
+            })
+            .catch(err => {
+                console.error('Failed to generate audio:', err);
+                alert('语音生成失败，请稍后重试');
+            })
+            .finally(() => {
+                playAudioBtn.textContent = '🔊 播放语音';
+                playAudioBtn.disabled = false;
+            });
+        }
+        
         // Initial Load
         loadMoments();
+        
+        // Check if we need to scroll to a specific moment
+        const urlParams = new URLSearchParams(window.location.search);
+        const targetMomentId = urlParams.get('moment_id');
+        if (targetMomentId) {
+            // Wait for moments to load, then scroll to target
+            const checkAndScroll = setInterval(() => {
+                const targetElement = document.querySelector(`.moment-item[data-moment-id="${targetMomentId}"]`);
+                if (targetElement) {
+                    clearInterval(checkAndScroll);
+                    // Smooth scroll to the target element
+                    targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    // Highlight the target element
+                    targetElement.style.transition = 'background-color 0.3s';
+                    targetElement.style.backgroundColor = '#fff3cd';
+                    setTimeout(() => {
+                        targetElement.style.backgroundColor = '';
+                    }, 2000);
+                }
+            }, 100);
+            
+            // Stop checking after 10 seconds
+            setTimeout(() => clearInterval(checkAndScroll), 10000);
+        }
         
         // Search
         searchBtn.addEventListener('click', () => {
@@ -274,6 +595,9 @@
                 const clone = template.content.cloneNode(true);
                 const card = clone.querySelector('.moment-item');
                 
+                // Add data-moment-id attribute for navigation
+                card.dataset.momentId = item.id;
+                
                 // User Info with fallback
                 const userName = item.publisher.name || 'Unknown User';
                 const userAvatar = item.publisher.avatar || '/static/avatars/default.png';
@@ -332,6 +656,53 @@
                 if (currentUser && currentUser.id === item.publisher.id) {
                     // Show dropdown menu for owner's posts
                     dropdownMenu.style.display = 'block';
+                    
+                    // Pin/Unpin buttons
+                    const pinBtn = clone.querySelector('.pin-btn');
+                    const unpinBtn = clone.querySelector('.unpin-btn');
+                    
+                    if (item.is_pinned) {
+                        pinBtn.classList.add('d-none');
+                        unpinBtn.classList.remove('d-none');
+                    } else {
+                        pinBtn.classList.remove('d-none');
+                        unpinBtn.classList.add('d-none');
+                    }
+                    
+                    pinBtn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        fetch(`/moments/${item.id}/pin`, {method: 'POST'})
+                            .then(res => res.json())
+                            .then(res => {
+                                if(res.code === 200) {
+                                    alert('置顶成功！');
+                                    card.classList.add('pinned-moment-card');
+                                    card.classList.add('border-warning');
+                                    pinBtn.classList.add('d-none');
+                                    unpinBtn.classList.remove('d-none');
+                                } else {
+                                    alert(res.msg || '置顶失败');
+                                }
+                            });
+                    });
+                    
+                    unpinBtn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        fetch(`/moments/${item.id}/unpin`, {method: 'POST'})
+                            .then(res => res.json())
+                            .then(res => {
+                                if(res.code === 200) {
+                                    alert('已取消置顶');
+                                    card.classList.remove('pinned-moment-card');
+                                    card.classList.remove('border-warning');
+                                    pinBtn.classList.remove('d-none');
+                                    unpinBtn.classList.add('d-none');
+                                } else {
+                                    alert(res.msg || '取消置顶失败');
+                                }
+                            });
+                    });
+                    
                     deleteBtn.addEventListener('click', (e) => {
                         e.preventDefault();
                         if(confirm('确定删除这条动态吗？')) {
@@ -460,6 +831,18 @@
                 });
 
                 momentsList.appendChild(clone);
+                
+                // Apply pinned styling if needed
+                if (item.is_pinned) {
+                    card.classList.add('pinned-moment-card');
+                    card.classList.add('border-warning');
+                    
+                    // Show pinned badge
+                    const pinnedBadgeContainer = clone.querySelector('.pinned-badge-container');
+                    if (pinnedBadgeContainer) {
+                        pinnedBadgeContainer.style.display = 'block';
+                    }
+                }
             });
         }
     });

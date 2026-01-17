@@ -54,23 +54,85 @@
     <!-- 日常动态板块 -->
     <div class="col-md-4">
         <div class="card love-card mb-4 shadow-sm border-0 h-100">
-            <div class="card-body text-center">
-                <div class="mb-3 display-1">📝</div>
-                <h3 class="card-title">恋爱日常</h3>
-                <p class="card-text text-muted">今天发生了什么有趣的事？</p>
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-3 pb-2 border-bottom">
+                    <div class="d-flex align-items-center">
+                        <span class="me-2">📝</span>
+                        <h5 class="mb-0 fw-bold">恋爱日常</h5>
+                    </div>
+                    <span class="badge bg-warning text-dark" id="pinnedCountBadge">置顶 0/3</span>
+                </div>
+                
+                <!-- 置顶日常列表 -->
+                <div id="pinnedMomentsList" class="mb-3">
+                    {% if pinned_moments %}
+                        {% for moment in pinned_moments %}
+                        <div class="card mb-2 pinned-moment-card border-warning" data-moment-id="{{ moment.id }}" style="cursor: pointer;" title="点击查看完整内容">
+                            <div class="card-body p-2">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <div class="d-flex align-items-center">
+                                        <img src="{{ moment.user.avatar }}" class="rounded-circle me-2" width="30" height="30" alt="Avatar">
+                                        <div>
+                                            <h6 class="mb-0 small fw-bold">{{ moment.user.name }}</h6>
+                                            <small class="text-muted">{{ moment.timestamp.strftime('%Y-%m-%d %H:%M') }}</small>
+                                        </div>
+                                    </div>
+                                    <div class="d-flex gap-1">
+                                        <span class="badge bg-warning text-dark">📌 置顶</span>
+                                        <button class="btn btn-sm btn-outline-warning unpin-btn" title="取消置顶" data-moment-id="{{ moment.id }}">
+                                            ✕
+                                        </button>
+                                    </div>
+                                </div>
+                                <p class="mb-0 small" style="white-space: pre-wrap;">{{ moment.content[:100] }}{% if moment.content|length > 100 %}...{% endif %}</p>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="text-center text-muted py-3 small">
+                            暂无置顶日常，点击"写日记"后可置顶重要内容
+                        </div>
+                    {% endif %}
+                </div>
+                
                 <a href="/moments" class="btn btn-primary w-100">写日记 / 发动态</a>
             </div>
         </div>
     </div>
 
-    <!-- 聊天板块 -->
+    <!-- "爱的一天"板块 -->
     <div class="col-md-4">
         <div class="card love-card mb-4 shadow-sm border-0 h-100">
-            <div class="card-body text-center">
-                <div class="mb-3 display-1">💬</div>
-                <h3 class="card-title">亲密聊天</h3>
-                <p class="card-text text-muted">想你了，发个消息吧</p>
-                <a href="/chat" class="btn btn-success w-100">进入聊天室</a>
+            <div class="card-body">
+                <!-- 顶部菜单栏 -->
+                <div class="d-flex align-items-center justify-content-between mb-3 pb-2 border-bottom">
+                    <div class="d-flex align-items-center">
+                        <span class="me-2">💕</span>
+                        <h5 class="mb-0 fw-bold">爱的一天</h5>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button id="refreshBroadcastBtn" class="btn btn-sm btn-outline-primary" title="刷新播报">
+                            🔄 刷新
+                        </button>
+                        <button id="viewHistoryBtn" class="btn btn-sm btn-outline-secondary" title="查看历史播报">
+                            📅 历史
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 播报内容 -->
+                <div id="broadcastContent" class="mb-3" style="white-space: pre-wrap; line-height: 1.6; font-size: 0.95rem; min-height: 120px;"></div>
+                <div id="broadcastLoading" class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="text-muted mt-2 small">正在加载...</p>
+                </div>
+                <div id="broadcastError" class="alert alert-danger d-none small">
+                    <p class="mb-0">加载失败，请稍后重试</p>
+                </div>
+                
+                <!-- 操作按钮 -->
+                <button id="playAudioBtn" class="btn btn-outline-secondary w-100">🔊 播放语音</button>
+                <audio id="broadcastAudio" controls class="w-100 d-none mt-2"></audio>
             </div>
         </div>
     </div>
@@ -131,11 +193,318 @@
         </div>
     </div>
 </div>
+
+<!-- Modal: 查看历史播报 -->
+<div class="modal fade" id="historyModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-scrollable modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">📅 爱的一天历史播报</h5>
+                <div class="ms-auto me-2 d-flex gap-2">
+                    <select id="historySortOrder" class="form-select form-select-sm">
+                        <option value="desc">时间倒序</option>
+                        <option value="asc">时间正序</option>
+                    </select>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <input type="text" id="historySearchInput" class="form-control" placeholder="搜索播报内容...">
+                </div>
+                <div id="historyList" class="list-group list-group-flush">
+                    <!-- Content loaded via JS -->
+                </div>
+            </div>
+            <div class="modal-footer justify-content-between">
+                <button id="historyPrevPage" class="btn btn-sm btn-outline-secondary" disabled>上一页</button>
+                <span id="historyPageInfo" class="small text-muted">第 1 页</span>
+                <button id="historyNextPage" class="btn btn-sm btn-outline-secondary" disabled>下一页</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
     document.addEventListener('DOMContentLoaded', function() {
+        let currentBroadcast = null;
+        
+        loadLoveOneDayBroadcast();
+        
+        function loadLoveOneDayBroadcast() {
+            const broadcastContent = document.getElementById('broadcastContent');
+            const broadcastLoading = document.getElementById('broadcastLoading');
+            const broadcastError = document.getElementById('broadcastError');
+            const broadcastAudio = document.getElementById('broadcastAudio');
+            
+            if (!broadcastContent) return;
+            
+            broadcastLoading.classList.remove('d-none');
+            broadcastContent.classList.add('d-none');
+            broadcastError.classList.add('d-none');
+            broadcastAudio.classList.add('d-none');
+            
+            fetch('/api/love-one-day/today')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.code === 200) {
+                        currentBroadcast = data.data;
+                        broadcastContent.textContent = data.data.text;
+                        broadcastLoading.classList.add('d-none');
+                        broadcastContent.classList.remove('d-none');
+                        
+                        if (data.data.audio_url) {
+                            broadcastAudio.src = data.data.audio_url;
+                            broadcastAudio.classList.remove('d-none');
+                        }
+                    } else {
+                        broadcastLoading.classList.add('d-none');
+                        broadcastError.classList.remove('d-none');
+                    }
+                })
+                .catch(err => {
+                    console.error('Failed to load love one day broadcast:', err);
+                    broadcastLoading.classList.add('d-none');
+                    broadcastError.classList.remove('d-none');
+                });
+        }
+        
+        document.getElementById('refreshBroadcastBtn').addEventListener('click', function(e) {
+            e.preventDefault();
+            loadLoveOneDayBroadcast();
+        });
+        
+        document.getElementById('viewHistoryBtn').addEventListener('click', function(e) {
+            e.preventDefault();
+            loadLoveOneDayHistory();
+        });
+        
+        let historyData = [];
+        let historyCurrentPage = 1;
+        let historyCurrentOrder = 'desc';
+        let historySearchKeyword = '';
+        const historyItemsPerPage = 10;
+        
+        function loadLoveOneDayHistory() {
+            const historyModal = new bootstrap.Modal(document.getElementById('historyModal'));
+            historyModal.show();
+            fetchHistoryData();
+        }
+        
+        function fetchHistoryData() {
+            const historyList = document.getElementById('historyList');
+            historyList.innerHTML = '<div class="text-center p-3"><div class="spinner-border text-primary" role="status"></div></div>';
+            
+            let url = `/api/love-one-day/history?page=${historyCurrentPage}&per_page=${historyItemsPerPage}&order=${historyCurrentOrder}`;
+            if (historySearchKeyword) {
+                url += `&keyword=${encodeURIComponent(historySearchKeyword)}`;
+            }
+            
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.code === 200) {
+                        historyData = data.data.items;
+                        renderHistoryList(data.data);
+                    } else {
+                        historyList.innerHTML = '<div class="text-center text-danger">加载失败，请重试</div>';
+                    }
+                })
+                .catch(err => {
+                    console.error('Failed to load history:', err);
+                    historyList.innerHTML = '<div class="text-center text-danger">加载失败，请重试</div>';
+                });
+        }
+        
+        function renderHistoryList(data) {
+            const historyList = document.getElementById('historyList');
+            const totalPages = Math.ceil(data.total / historyItemsPerPage);
+            
+            if (data.items.length === 0) {
+                historyList.innerHTML = '<div class="text-center text-muted p-4">暂无历史播报</div>';
+                document.getElementById('historyPageInfo').textContent = '第 0 / 0 页';
+                document.getElementById('historyPrevPage').disabled = true;
+                document.getElementById('historyNextPage').disabled = true;
+                return;
+            }
+            
+            let html = '';
+            data.items.forEach(item => {
+                const typeBadge = getBroadcastTypeBadge(item.broadcast_type);
+                html += `
+                    <div class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div>
+                                <span class="badge bg-secondary mb-1">${item.date}</span>
+                                ${typeBadge}
+                            </div>
+                            <small class="text-muted">${item.created_at}</small>
+                        </div>
+                        <p class="mb-0" style="white-space: pre-wrap; line-height: 1.6;">${item.text}</p>
+                    </div>
+                `;
+            });
+            
+            historyList.innerHTML = html;
+            document.getElementById('historyPageInfo').textContent = `第 ${historyCurrentPage} / ${totalPages} 页`;
+            document.getElementById('historyPrevPage').disabled = historyCurrentPage === 1;
+            document.getElementById('historyNextPage').disabled = historyCurrentPage >= totalPages;
+        }
+        
+        function getBroadcastTypeBadge(type) {
+            const typeMap = {
+                'anniversary': '<span class="badge bg-danger">💕 纪念日</span>',
+                'historical_moments': '<span class="badge bg-info">📸 历史日常</span>',
+                'historical_events': '<span class="badge bg-warning">🗓️ 历史趣事</span>'
+            };
+            return typeMap[type] || '<span class="badge bg-secondary">未知</span>';
+        }
+        
+        document.getElementById('historySortOrder').addEventListener('change', function(e) {
+            historyCurrentOrder = e.target.value;
+            historyCurrentPage = 1;
+            fetchHistoryData();
+        });
+        
+        document.getElementById('historySearchInput').addEventListener('input', function(e) {
+            historySearchKeyword = e.target.value.trim();
+            historyCurrentPage = 1;
+            fetchHistoryData();
+        });
+        
+        document.getElementById('historyPrevPage').addEventListener('click', function() {
+            if (historyCurrentPage > 1) {
+                historyCurrentPage--;
+                fetchHistoryData();
+            }
+        });
+        
+        document.getElementById('historyNextPage').addEventListener('click', function() {
+            historyCurrentPage++;
+            fetchHistoryData();
+        });
+        
+        document.getElementById('playAudioBtn').addEventListener('click', function(e) {
+            e.preventDefault();
+            const broadcastAudio = document.getElementById('broadcastAudio');
+            if (currentBroadcast && currentBroadcast.audio_url) {
+                broadcastAudio.play();
+            } else if (currentBroadcast) {
+                generateAudio(currentBroadcast);
+            } else {
+                alert('请先加载播报内容');
+            }
+        });
+        
+        function generateAudio(broadcast) {
+            const playAudioBtn = document.getElementById('playAudioBtn');
+            playAudioBtn.textContent = '🔊 生成中...';
+            playAudioBtn.disabled = true;
+            
+            fetch('/api/love-one-day/tts', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    text: broadcast.text,
+                    report_id: broadcast.id
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.code === 200) {
+                    currentBroadcast.audio_url = data.data.audio_url;
+                    const broadcastAudio = document.getElementById('broadcastAudio');
+                    broadcastAudio.src = data.data.audio_url;
+                    broadcastAudio.classList.remove('d-none');
+                    broadcastAudio.play();
+                } else {
+                    alert('语音生成失败: ' + data.msg);
+                }
+            })
+            .catch(err => {
+                console.error('Failed to generate audio:', err);
+                alert('语音生成失败，请稍后重试');
+            })
+            .finally(() => {
+                playAudioBtn.textContent = '🔊 播放语音';
+                playAudioBtn.disabled = false;
+            });
+        }
+        
+        // --- Pinned Moments Logic ---
+        function initPinnedMoments() {
+            const unpinButtons = document.querySelectorAll('.unpin-btn');
+            const pinnedCountBadge = document.getElementById('pinnedCountBadge');
+            const pinnedMomentCards = document.querySelectorAll('.pinned-moment-card');
+            
+            // Update pinned count badge
+            const pinnedCount = document.querySelectorAll('.pinned-moment-card').length;
+            if (pinnedCountBadge) {
+                pinnedCountBadge.textContent = `置顶 ${pinnedCount}/3`;
+            }
+            
+            // Add click event to pinned moment cards for navigation
+            pinnedMomentCards.forEach(card => {
+                card.addEventListener('click', function(e) {
+                    // Don't navigate if clicking on unpin button
+                    if (e.target.classList.contains('unpin-btn') || e.target.closest('.unpin-btn')) {
+                        return;
+                    }
+                    
+                    const momentId = this.dataset.momentId;
+                    if (momentId) {
+                        window.location.href = `/moments?moment_id=${momentId}`;
+                    }
+                });
+            });
+            
+            // Add event listeners to unpin buttons
+            unpinButtons.forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const momentCard = this.closest('.pinned-moment-card');
+                    const momentId = momentCard.dataset.momentId;
+                    
+                    fetch(`/moments/${momentId}/unpin`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'}
+                    })
+                    .then(res => res.json())
+                    .then(res => {
+                        if (res.code === 200) {
+                            momentCard.remove();
+                            const newCount = document.querySelectorAll('.pinned-moment-card').length;
+                            if (pinnedCountBadge) {
+                                pinnedCountBadge.textContent = `置顶 ${newCount}/3`;
+                            }
+                            
+                            // Show empty message if no pinned moments
+                            if (newCount === 0) {
+                                const pinnedList = document.getElementById('pinnedMomentsList');
+                                pinnedList.innerHTML = `
+                                    <div class="text-center text-muted py-3 small">
+                                        暂无置顶日常，点击"写日记"后可置顶重要内容
+                                    </div>
+                                `;
+                            }
+                        } else {
+                            alert(res.msg || '取消置顶失败');
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Failed to unpin moment:', err);
+                        alert('取消置顶失败，请稍后重试');
+                    });
+                });
+            });
+        }
+        
+        // Initialize pinned moments on page load
+        initPinnedMoments();
+        
         // --- Add Anniversary Logic ---
         const btn = document.getElementById('addAnniversaryBtn');
         const modalEl = document.getElementById('addAnniversaryModal');
